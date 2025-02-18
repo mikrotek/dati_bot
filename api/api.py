@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, request, Blueprint
 from api.database import get_all_products, get_product_by_asin, save_product_data
 import logging
+import os
+
 
 
 # Configurazione logging
@@ -57,4 +59,5 @@ app = Flask(__name__)
 app.register_blueprint(api_blueprint)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    port = int(os.environ.get("PORT", 5001))  # Render assegna la porta automaticamente
+    app.run(host="0.0.0.0", port=port)
