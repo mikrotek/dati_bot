@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Offerte Speciali</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+        .container { max-width: 600px; background: #ffffff; padding: 20px; border-radius: 10px; }
+        h2 { color: #333333; }
+        .offer-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .offer-table th, .offer-table td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        .offer-table th { background-color: #007BFF; color: white; }
+        .button { display: block; width: 100%; background: #28a745; color: white; text-align: center; padding: 10px; text-decoration: none; margin-top: 15px; border-radius: 5px; }
+        .button-danger { background: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔥 Offerte Speciali per Te!</h2>
+        <p>Ecco le ultime offerte che abbiamo trovato per te:</p>
+        <table class="offer-table">
+            <tr>
+                <th>Prodotto</th>
+                <th>Prezzo</th>
+                <th>Sconto</th>
+            </tr>
+            {offer_rows}
+        </table>
+        <a href="{dashboard_link}" class="button">🔍 Vai alla Dashboard</a>
+        <a href="{unsubscribe_link}" class="button button-danger">❌ Disattiva Notifiche</a>
+    </div>
+</body>
+</html>

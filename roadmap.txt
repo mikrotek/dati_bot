@@ -1,0 +1,138 @@
+# **White Paper - AI-Powered Price Tracker**
+
+## **📌 Introduzione**
+L'obiettivo di questo documento è tracciare in modo preciso lo sviluppo, gli errori riscontrati, i miglioramenti, la roadmap e le strategie di monetizzazione del progetto **AI-Powered Price Tracker**. Il documento sarà una guida scalabile e sempre riprendibile in qualsiasi momento per garantire il successo del progetto.
+
+---
+
+## **🛠 Struttura del Progetto**
+
+### **📂 Directory e Moduli Principali**
+- **src/** (Codice sorgente)
+  - `scraper.py` → Scraper per Amazon, eBay, Google Shopping, AliExpress
+  - `google_scraper.py` → Scraper specifico per Google Shopping
+  - `shopify_scraper.py` → Scraper per Shopify (in valutazione)
+  - `database.py` → Gestione PostgreSQL
+  - `notifications.py` → Sistema notifiche (Telegram, Email)
+  - `ml_model.py` → Modelli di Machine Learning
+- **models/** (Modelli AI)
+  - `ml_price_prediction.pkl` → Modello XGBoost
+  - `lstm_model.keras` → Modello LSTM per serie temporali
+- **dashboard/** (Interfaccia utente - Streamlit)
+  - `dashboard.py` → Dashboard interattiva
+- **data/** (Dati raccolti)
+  - `price_history.csv` → Storico prezzi
+  - `predictions.csv` → Previsioni AI
+
+---
+
+## **✅ Progressi Compiuti**
+
+### **1️⃣ Scraping e Data Collection**
+✅ **Amazon Scraper** funzionante con prezzo, rating, recensioni, sconto
+✅ **eBay Scraper** funzionante (in attesa di API Key definitiva)
+✅ **Google Shopping Scraper** (da migliorare, problemi con blocchi e proxy)
+✅ **AliExpress API** (da configurare, difficoltà nell'accesso come privato)
+✅ **Shopify Scraper** (in valutazione, necessita autorizzazioni dei venditori)
+
+### **2️⃣ Machine Learning & AI**
+✅ **Modello XGBoost** addestrato e funzionante (accuratezza 99%)
+✅ **Modello LSTM** per analisi trend di lungo periodo (da migliorare)
+✅ **Database con storico prezzi** per addestramento AI
+
+### **3️⃣ Notifiche & Automazioni**
+✅ **Notifiche Telegram & Email attive** (da ottimizzare per alert dinamici)
+✅ **Sistema di monitoraggio prezzi con soglie personalizzabili**
+
+### **4️⃣ Monetizzazione e Scalabilità**
+✅ **Affiliate Marketing Amazon & eBay** (attesa API Amazon definitiva)
+✅ **Modello di abbonamento SaaS (Free/Premium)**
+✅ **Piano per vendita di report avanzati alle aziende**
+
+---
+
+## **⚠️ Errori e Problemi Riscontrati**
+
+### **🔴 Scraping Google Shopping**
+- **Problema**: Nessun prodotto trovato, blocchi frequenti
+- **Possibili Soluzioni**:
+  - Implementare proxy premium o VPS con IP dedicati
+  - Cambiare strategia di parsing HTML (Google aggiorna spesso la struttura)
+  - Valutare scraping con Selenium invece che Requests
+
+### **🔴 API Marketplace (AliExpress, eBay)**
+- **Problema**: Difficoltà nell'accesso API senza account business
+- **Possibili Soluzioni**:
+  - Creare un account business per ottenere API ufficiali
+  - Testare scraping manuale come alternativa (proxy necessari)
+
+### **🔴 Machine Learning Ottimizzazione**
+- **Problema**: LSTM meno accurato rispetto a XGBoost
+- **Possibili Soluzioni**:
+  - Aggiungere più dati storici (rolling average, prezzi stagionali)
+  - Tuning iperparametri per ottimizzazione predittiva
+
+---
+
+## **📌 Roadmap e Passaggi Mancanti**
+
+### **1️⃣ Completare API Marketplace (Amazon, eBay, AliExpress)**
+🔹 **Azioni:**
+- Ottenere API Amazon (in attesa delle 3 vendite necessarie)
+- Creare account business AliExpress per accesso API
+- Risolvere problemi account eBay per ottenere API Key
+
+### **2️⃣ Ottimizzazione Scraping Google Shopping**
+🔹 **Azioni:**
+- Testare Selenium con gestione dei cookie
+- Implementare proxy premium/VPS per evitare blocchi
+- Debug parsing HTML per estrarre correttamente i dati
+
+### **3️⃣ Automazione e Monetizzazione**
+🔹 **Azioni:**
+- Implementare sistema di rotazione proxy
+- Aggiungere opzione abbonamento premium per scraping illimitato
+- Creare report automatici per vendita dati alle aziende
+
+### **4️⃣ Machine Learning Avanzato per Previsioni Prezzi**
+🔹 **Azioni:**
+- Integrare più dati storici (trend stagionali, offerte flash)
+- Migliorare algoritmo di previsione con ensemble di modelli (XGBoost + LSTM)
+- Creare un bot di analisi automatizzato per suggerire momenti migliori per comprare/vendere
+
+---
+
+## **💰 Strategie di Monetizzazione**
+
+### **1️⃣ Vendita Dati alle Aziende**
+✅ Report avanzati con dati di mercato aggiornati (prezzi, offerte, trend)
+✅ Accesso API ai dati raccolti per aziende che vogliono analisi dettagliate
+
+### **2️⃣ Marketplace Affiliazioni & Vendita Automatica**
+✅ Sito marketplace con scraping aggiornato per monetizzare con affiliazioni
+✅ Dashboard utente con tracking offerte personalizzate
+
+### **3️⃣ Abbonamenti SaaS per il Software**
+✅ Versione Free (limiti scraping, solo API)
+✅ Versione Premium (scraping avanzato, AI, proxy gestiti)
+✅ Notifiche esclusive per utenti paganti
+
+### **4️⃣ Machine Learning per Arbitraggio**
+✅ Sistema AI per comprare a prezzo minimo e rivendere quando il prezzo sale
+✅ Analisi storica dei prezzi per suggerire i migliori investimenti
+
+---
+
+## **📌 Conclusione e Prossimi Passi**
+L'obiettivo è **finalizzare e ottimizzare il progetto per renderlo pienamente operativo e profittevole**. Con il **giusto equilibrio tra scraping, API e Machine Learning**, possiamo ottenere un sistema scalabile e redditizio.
+
+🔹 **Prossimo Step:** Completare API eBay & AliExpress, migliorare scraping Google Shopping, integrare proxy.
+🔹 **Focus:** Testare la stabilità del sistema con più marketplace e ottimizzare la monetizzazione.
+
+📌 **Strategia finale da definire:**
+1️⃣ Tenere il software per uso personale e monetizzare i dati raccolti
+2️⃣ Creare una piattaforma pubblica e vendere accessi
+3️⃣ Combinare entrambi per massimizzare i guadagni
+
+🚀 **Ora abbiamo un piano dettagliato, procediamo con i test e l'implementazione!**
+
