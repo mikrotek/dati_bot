@@ -1,175 +1,164 @@
-import requests
-from bs4 import BeautifulSoup
-import logging
+import os
 import time
 import random
+import logging
 import psycopg2
+import requests
+import json  # Aggiunto import JSON
 from dotenv import load_dotenv
-import os
-import json
-import csv
-from amazon_paapi import AmazonApi
+from datetime import datetime
+from bs4 import BeautifulSoup
 
-# ✅ Carica variabili d'ambiente
-load_dotenv()
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
-AWS_ASSOCIATE_TAG = os.getenv("AWS_ASSOCIATE_TAG")
-AWS_REGION = "IT"
+# Configura il logging con DEBUG ATTIVO
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# ✅ Configurazione logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Carica le variabili d'ambiente
+load_dotenv("config/.env")
 
-# ✅ User-Agents multipli per evitare blocchi
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-]
-
-# ✅ Inizializza Amazon API
-try:
-    amazon_api = AmazonApi(AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_ASSOCIATE_TAG, AWS_REGION)
-    logger.info("✅ Amazon API configurata correttamente!")
-except Exception as e:
-    logger.error(f"❌ Errore nella configurazione Amazon API: {e}")
-    amazon_api = None
-
+# **Connessione al Database**
 def connect_db():
-    """🔗 Connessione al database PostgreSQL."""
     try:
         conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT")
         )
-        conn.set_client_encoding('UTF8')
+        logging.info("✅ Connessione al database avvenuta con successo!")
         return conn
     except Exception as e:
-        logger.error(f"❌ Errore di connessione al database: {e}")
+        logging.error(f"❌ Errore di connessione al database: {e}")
         return None
 
-def parse_price(price):
-    if price and isinstance(price, str):
-        clean_price = price.replace("€", "").replace(",", ".").strip()
-        return float(clean_price) if clean_price.replace(".", "").isdigit() else None
-    return None
+# **Verifica la struttura della tabella**
+def check_database_structure(conn):
+    cur = conn.cursor()
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='product_prices'")
+    existing_columns = {row[0] for row in cur.fetchall()}
+    required_columns = {"asin", "name", "price", "image_url", "category", "created_at"}
 
-def scrape_amazon_product_html(url):
-    """🔍 Effettua lo scraping HTML di un prodotto Amazon."""
-    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    missing_columns = required_columns - existing_columns
+    if missing_columns:
+        logging.error(f"❌ Mancano le seguenti colonne nel database: {missing_columns}")
+        return False
+    return True
+
+# **Verifica i prodotti nel database**
+def get_existing_products(conn, category):
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT category FROM product_prices;")
+    categories = cur.fetchall()
+    logging.debug(f"📊 Categorie nel database: {categories}")
+
+    cur.execute("SELECT asin, name, price, image_url FROM product_prices WHERE LOWER(category) = LOWER(%s)", (category,))
+    products = cur.fetchall()
+
+    if not products:
+        logging.warning(f"⚠️ Nessun prodotto trovato per la categoria '{category}' nel database.")
+    else:
+        logging.info(f"✅ {len(products)} prodotti trovati per la categoria '{category}':")
+        for product in products[:5]:  # Mostra solo i primi 5 prodotti
+            logging.info(f"🔹 {product[1]} (€{product[2]}) - ASIN: {product[0]}")
+
+    return products
+
+# **Scraping HTML**
+def scrape_html(category):
+    url = f"https://www.amazon.it/s?k={category}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.google.com",
+        "DNT": "1"
+    }
+
     try:
+        logging.info(f"🔍 Avvio scraping HTML per categoria: {category}")
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logging.error(f"❌ Errore HTTP {response.status_code}")
+            return []
+
         soup = BeautifulSoup(response.text, "html.parser")
+        products = []
+        for item in soup.select("div[data-asin]"):
+            asin = item.get("data-asin")
+            title = item.select_one("span.a-text-normal")
+            price = item.select_one("span.a-price-whole")
+            image = item.select_one("img.s-image")
 
-        return {
-            "name": soup.find("span", {"id": "productTitle"}).text.strip() if soup.find("span", {"id": "productTitle"}) else "N/A",
-            "price": parse_price(soup.find("span", {"class": "a-price-whole"}).text) if soup.find("span", {"class": "a-price-whole"}) else None,
-            "old_price": parse_price(soup.find("span", {"class": "a-price a-text-price"}).text) if soup.find("span", {"class": "a-price a-text-price"}) else "N/A",
-            "rating": soup.find("span", {"class": "a-icon-alt"}).text.strip() if soup.find("span", {"class": "a-icon-alt"}) else "N/A",
-            "reviews": soup.find("span", {"id": "acrCustomerReviewText"}).text.strip() if soup.find("span", {"id": "acrCustomerReviewText"}) else "N/A",
-            "image_url": soup.find("img", {"id": "landingImage"})["src"] if soup.find("img", {"id": "landingImage"}) else "N/A",
-            "affiliate_link": url
-        }
-    except Exception as e:
-        logger.error(f"❌ Errore nello scraping HTML di {url}: {e}")
-        return None
+            if asin and title and price and image:
+                products.append({
+                    "asin": asin,
+                    "name": title.text.strip(),
+                    "price": float(price.text.replace(",", ".")),
+                    "image_url": image["src"],
+                    "category": category,
+                    "created_at": datetime.now()
+                })
+        logging.info(f"📊 {len(products)} prodotti trovati nello scraping HTML")
+        return products
+    except requests.RequestException as e:
+        logging.error(f"❌ Errore nello scraping HTML: {e}")
+        return []
 
-def scrape_amazon_product_api(asin):
-    """🔍 Recupera il prodotto tramite Amazon API."""
+# **Chiamata API Amazon**
+def fetch_from_amazon_api(asin):
+    url = "https://webservices.amazon.it/paapi5/getItems"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "ItemIds": [asin],
+        "Resources": ["Images.Primary.Large", "ItemInfo.Title", "Offers.Listings.Price"],
+        "PartnerTag": os.getenv("AWS_ASSOCIATE_TAG"),
+        "PartnerType": "Associates",
+        "Marketplace": "www.amazon.it"
+    }
+
+    logging.debug(f"📡 Payload della richiesta API Amazon: {json.dumps(payload, indent=4)}")
+
     try:
-        response = amazon_api.get_items([asin])
-        if response:
-            item = response[0]
-            
-            def parse_price(price):
-                if price and isinstance(price, str):
-                    clean_price = price.replace("€", "").replace(",", ".").strip()
-                    return float(clean_price) if clean_price.replace(".", "").isdigit() else None
-                return None
+        logging.info(f"🔍 Recupero dati API Amazon per ASIN: {asin}")
+        response = requests.post(url, json=payload, headers=headers, auth=(os.getenv("AWS_ACCESS_KEY"), os.getenv("AWS_SECRET_KEY")))
+        logging.debug(f"📡 Risposta API Amazon: {response.status_code} - {response.text}")
 
-            current_price = parse_price(item.offers.listings[0].price.display_amount) if item.offers and item.offers.listings else None
-            old_price = parse_price(item.offers.listings[0].price.amount) if item.offers and item.offers.listings and hasattr(item.offers.listings[0].price, "amount") else None
-            
-            discount = None
-            if current_price is not None and old_price is not None and old_price > 0:
-                discount = round((1 - (current_price / old_price)) * 100, 2)
-            
+        if response.status_code != 200:
+            logging.error(f"❌ Errore API Amazon: {response.status_code} - {response.text}")
+            return None
+
+        data = response.json()
+        if "ItemsResult" in data and "Items" in data["ItemsResult"]:
+            item = data["ItemsResult"]["Items"][0]
             return {
                 "asin": asin,
-                "name": item.item_info.title.display_value if item.item_info and hasattr(item.item_info, "title") else "N/A",
-                "price": current_price,
-                "old_price": old_price,
-                "discount": discount,
-                "rating": "N/A",
-                "reviews": "N/A",
-                "image_url": item.images.primary.large.url if item.images and item.images.primary else "N/A",
-                "affiliate_link": item.detail_page_url if hasattr(item, "detail_page_url") else "N/A"
+                "name": item["ItemInfo"]["Title"]["DisplayValue"],
+                "price": item["Offers"]["Listings"][0]["Price"]["Amount"],
+                "image_url": item["Images"]["Primary"]["Large"]["URL"],
+                "category": "Unknown",
+                "created_at": datetime.now()
             }
+        else:
+            logging.warning(f"⚠️ Nessun dato trovato per ASIN {asin}")
+            return None
     except Exception as e:
-        logger.error(f"❌ Errore Amazon API per ASIN {asin}: {e}")
+        logging.error(f"❌ Errore API Amazon: {e}")
         return None
 
-def save_product_to_db(product):
-    """💾 Salva un prodotto nel database."""
+# **Funzione principale**
+def main():
+    category = input("Inserisci la categoria da cercare (Laptop, Smartphone, Tablet, ecc.): ").strip().lower()
     conn = connect_db()
     if not conn:
         return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO product_prices (asin, name, price, old_price, discount, rating, reviews, image_url, affiliate_link, scraped_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (asin) DO UPDATE SET
-                    price = COALESCE(EXCLUDED.price, product_prices.price),
-                    old_price = COALESCE(EXCLUDED.old_price, product_prices.old_price),
-                    discount = COALESCE(EXCLUDED.discount, product_prices.discount),
-                    rating = COALESCE(EXCLUDED.rating, product_prices.rating),
-                    reviews = COALESCE(EXCLUDED.reviews, product_prices.reviews),
-                    image_url = EXCLUDED.image_url,
-                    affiliate_link = EXCLUDED.affiliate_link,
-                    scraped_at = CURRENT_TIMESTAMP;
-            """, (
-                product["asin"],
-                product["name"],
-                product["price"] if isinstance(product["price"], (int, float)) else None,
-                product["old_price"] if isinstance(product["old_price"], (int, float)) else None,
-                product["discount"] if isinstance(product["discount"], (int, float)) else None,
-                product["rating"] if isinstance(product["rating"], (int, float)) else None,
-                product["reviews"] if isinstance(product["reviews"], int) else None,
-                product["image_url"],
-                product["affiliate_link"]
-            ))
-        conn.commit()
-        logger.info(f"✅ Prodotto salvato: {product['name']}")
-    except Exception as e:
-        logger.error(f"❌ Errore nel salvataggio del prodotto: {e}")
-    finally:
-        conn.close()
 
-def scrape_and_save(asin, url):
-    """🔄 Scrape prodotto con API, altrimenti fallback su HTML."""
-    product = scrape_amazon_product_api(asin)
-    if not product:
-        product = scrape_amazon_product_html(url)
-    if product:
-        save_product_to_db(product)
-    else:
-        logger.warning(f"⚠️ Nessun dato recuperato per {asin}")
+    existing_products = get_existing_products(conn, category)
+    if not existing_products:
+        scraped_products = scrape_html(category)
+        if scraped_products:
+            logging.info("✅ Scraping completato con successo!")
+
+    conn.close()
+    logging.info("✅ Processo terminato!")
 
 if __name__ == "__main__":
-    test_products = [
-        {"asin": "B0DKTJ22QN", "url": "https://www.amazon.it/dp/B0DKTJ22QN/?tag=mikrotech-21"},
-        {"asin": "B0D8WDJXR6", "url": "https://www.amazon.it/dp/B0D8WDJXR6/?tag=mikrotech-21"}
-    ]
-    for product in test_products:
-        scrape_and_save(product["asin"], product["url"])
+    main()

@@ -1,122 +1,122 @@
-import time
 import logging
+import argparse
 import os
-import sys
-import asyncio
+import psutil
+import csv
 from flask import Flask
-from api.api import api_blueprint
-from dotenv import load_dotenv
-from api.scraper import Scraper
-from api.analytics import generate_report
-from api.telegram_bot import main as telegram_main
-from api.notifications import send_bulk_emails
-from api.database import check_license, add_user, connect_db, create_tables
 
+# ✅ Gestione import con try-except per evitare crash
+try:
+    from api.api import api_blueprint
+    from api.database import connect_db, create_tables, add_user, get_all_users
+    from api.scraper import run_scraper
+    from api.reports import generate_report
+    from api.telegram_bot import start_telegram_bot, send_telegram_message
+    from api.notifications import send_bulk_emails
+except ImportError as e:
+    logging.error(f"❌ Errore negli import: {e}")
+    exit(1)
+
+# ✅ Configurazione logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ✅ Creazione dell'app Flask
 app = Flask(__name__)
+
+# ✅ Registrazione delle API
 app.register_blueprint(api_blueprint)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
-    
-# ✅ Carica variabili d'ambiente
-load_dotenv()
+def is_scraper_running():
+    """Verifica se lo scraper è già in esecuzione per evitare conflitti."""
+    for process in psutil.process_iter(attrs=['pid', 'name']):
+        if 'python' in process.info['name'] and 'scraper.py' in process.cmdline():
+            return True
+    return False
 
-def get_base_dir():
-    """Determina il percorso base del programma, compatibile con l'eseguibile .exe."""
-    return os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-
-BASE_DIR = get_base_dir()
-DATA_DIR = os.path.join(BASE_DIR, "data")
-PLOTS_DIR = os.path.join(BASE_DIR, "plots")
-
-def ensure_directories():
-    """Crea le directory necessarie per il programma."""
-    os.makedirs(os.path.join(DATA_DIR, "raw"), exist_ok=True)
-    os.makedirs(os.path.join(DATA_DIR, "analysis"), exist_ok=True)
-    os.makedirs(PLOTS_DIR, exist_ok=True)
-
-def get_scraper_mode():
-    """Seleziona il metodo di scraping: API o HTML."""
-    print("\n📌 Seleziona il metodo di scraping:")
-    print("1️⃣ Amazon API (richiede chiave)")
-    print("2️⃣ Scraping HTML")
-    
-    mode = input("🔍 Inserisci il numero della modalità: ").strip()
-    return "api" if mode == "1" else "html" if mode == "2" else None
-
-def get_category():
-    """Seleziona la categoria predefinita per lo scraping."""
-    category_mapping = {
-        "1": "laptop",
-        "2": "smartphone",
-        "3": "smartwatch",
-        "4": "tablet",
-        "5": "televisori"
-    }
-    
-    print("\n📌 Seleziona una categoria per il monitoraggio prezzi:")
-    for key, value in category_mapping.items():
-        print(f"{key}️⃣ {value.capitalize()}")
-    
-    user_input = input("🔍 Inserisci il numero della categoria: ").strip()
-    return category_mapping.get(user_input, None)
-
-def validate_license():
-    """Gestisce la verifica e registrazione della licenza."""
-    create_tables()
-    license_key = input("🔑 Inserisci la chiave di licenza: ").strip()
-    
-    if not check_license(license_key):
-        email = input("📩 Inserisci la tua email per registrare la licenza: ").strip()
-        if add_user(email, license_key):
-            print("✅ Registrazione completata! Licenza attivata con successo.")
-        else:
-            print("❌ Errore nella registrazione. Contatta il supporto.")
-            sys.exit()
-
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    logging.info("🚀 Programma avviato.")
-    
-    validate_license()
-    ensure_directories()
-    
-    try:
-        scraper_mode = get_scraper_mode()
-        if not scraper_mode:
-            logging.error("❌ Modalità di scraping non valida. Riprova.")
-            return
-
-        category = get_category()
-        if not category:
-            logging.error("❌ Categoria non valida. Riprova.")
-            return
-        
-        scraper = Scraper(category, mode=scraper_mode)
-        data = scraper.scrape()
-        
-        if data and len(data) > 0:
-            scraper.save_to_db(data)
-            logging.info("✅ Dati raccolti e salvati con successo!")
-            
-            generate_report()
-            send_bulk_emails()
-            asyncio.run(telegram_main())
-            logging.info("✅ Analisi completata e notifiche inviate!")
-            print("\n🎉 ✅ Analisi completata! Report e notifiche generati con successo.")
-        else:
-            logging.warning("⚠️ Nessun dato raccolto durante lo scraping.")
-
-        scraper.close()
-    
-    except Exception as e:
-        logging.error(f"❌ Errore durante l'esecuzione del programma: {e}")
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--single-run":
-        main()
+def save_data_to_csv():
+    """Salva i dati raccolti nel database in un file CSV per analisi future."""
+    conn = connect_db()
+    if conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM product_prices")
+        data = cur.fetchall()
+        conn.close()
+        filename = "data/price_data.csv"
+        with open(filename, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([desc[0] for desc in cur.description])
+            writer.writerows(data)
+        logger.info(f"✅ Dati salvati in {filename}")
     else:
-        while True:
-            main()
-            print("\n🔁 Il programma ha completato tutte le operazioni. Premi Ctrl+C per uscire o attendi il prossimo ciclo.")
-            time.sleep(86400)  # Esegui ogni 24 ore
+        logger.error("❌ Errore nella connessione al database, impossibile salvare CSV.")
+
+def initialize():
+    """
+    🚀 Inizializza il sistema:
+    - Crea le tabelle se non esistono
+    - Avvia il bot di Telegram
+    - Lancia il processo di scraping se non già attivo
+    - Genera report periodici
+    - Invia notifiche agli utenti
+    """
+    logger.info("🔄 Inizializzazione del sistema...")
+    
+    # ✅ Connessione e creazione tabelle database
+    conn = connect_db()
+    if conn:
+        create_tables()
+        conn.close()
+        logger.info("✅ Database inizializzato correttamente.")
+    else:
+        logger.error("❌ Errore nella connessione al database!")
+
+    # ✅ Verifica se lo scraper è già attivo prima di avviarlo
+    if not is_scraper_running():
+        logger.info("🔍 Avvio dello scraping...")
+        run_scraper()
+    else:
+        logger.info("✅ Lo scraper è già in esecuzione, salto avvio.")
+
+    # ✅ Salvataggio dati in CSV
+    save_data_to_csv()
+
+    # ✅ Generazione di un report all'avvio
+    logger.info("📊 Generazione report iniziale...")
+    report_file = generate_report()
+    if report_file:
+        logger.info(f"✅ Report salvato in {report_file}")
+    else:
+        logger.warning("⚠️ Nessun report generato!")
+
+    # ✅ Invio notifiche agli utenti
+    users = get_all_users()
+    if users:
+        for user in users:
+            send_telegram_message(user[1], "📢 Nuovi dati disponibili! Controlla il report.")
+            send_bulk_emails(user[1], "📢 Nuovo Report Disponibile!", "Trovi i nuovi dati nel sistema.")
+        logger.info("✅ Notifiche inviate agli utenti.")
+    else:
+        logger.warning("⚠️ Nessun utente registrato per ricevere notifiche.")
+
+    # ✅ Avvio del bot Telegram
+    logger.info("🤖 Avvio del bot Telegram...")
+    start_telegram_bot()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--single-run", action="store_true", help="Esegui lo scraper una sola volta e poi esci")
+    args = parser.parse_args()
+
+    if args.single_run:
+        logger.info("🔄 Esecuzione in modalità 'single-run'...")
+        run_scraper()
+        save_data_to_csv()
+        logger.info("📊 Generazione report dopo lo scraping...")
+        generate_report()
+    else:
+        # ✅ Avvio inizializzazione
+        initialize()
+        # ✅ Avvio server Flask (debug disattivato per produzione)
+        logger.info("🌐 Avvio del server Flask...")
+        app.run(host="0.0.0.0", port=5001, debug=False)

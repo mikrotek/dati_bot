@@ -3,7 +3,6 @@ import os
 import logging
 from psycopg2 import sql
 from dotenv import load_dotenv
-from psycopg2.extras import RealDictCursor
 
 # ✅ Carica variabili d'ambiente
 load_dotenv()
@@ -17,6 +16,7 @@ DB_PORT = os.getenv("DB_PORT")
 
 # ✅ Configurazione logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 def connect_db():
     """🔗 Connessione al database PostgreSQL."""
@@ -28,7 +28,7 @@ def connect_db():
             host=DB_HOST,
             port=DB_PORT
         )
-        conn.set_client_encoding('UTF8')  
+        conn.set_client_encoding('UTF8')
         logging.info("✅ Connessione al database avvenuta con successo!")
         return conn
     except Exception as e:
@@ -36,7 +36,7 @@ def connect_db():
         return None      
 
 def create_tables():
-    """🛠️ Crea/Aggiorna le tabelle ottimizzate."""
+    """🛠️ Crea/Aggiorna tutte le tabelle del database."""
     conn = connect_db()
     if not conn:
         return
@@ -58,105 +58,78 @@ def create_tables():
                     affiliate_link TEXT,
                     scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-
                 CREATE INDEX IF NOT EXISTS idx_product_prices_asin ON product_prices(asin);
-
-                CREATE TABLE IF NOT EXISTS price_history (
-                    id SERIAL PRIMARY KEY,
-                    asin TEXT NOT NULL,
-                    price FLOAT CHECK (price > 0),
-                    old_price FLOAT,
-                    rating FLOAT,
-                    reviews INT,
-                    price_diff FLOAT GENERATED ALWAYS AS (old_price - price) STORED,
-                    rolling_avg_7 FLOAT,
-                    rolling_avg_14 FLOAT,
-                    rolling_avg_30 FLOAT,
-                    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (asin) REFERENCES product_prices(asin) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_price_history_asin ON price_history(asin);
             """)
         conn.commit()
-        logging.info("✅ Tabelle ottimizzate create/verificate con successo.")
+        logging.info("✅ Tabelle create/verificate con successo.")
     except Exception as e:
         logging.error(f"❌ Errore nella creazione delle tabelle: {e}")
     finally:
         conn.close()
 
-def save_product_data(products):
-    """💾 Salva i dati dei prodotti nel database PostgreSQL."""
-    conn = connect_db()
-    if not conn:
-        return
-    try:
-        with conn.cursor() as cur:
-            insert_query = sql.SQL("""
-                INSERT INTO product_prices (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, scraped_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (asin) DO UPDATE 
-                SET price = EXCLUDED.price, 
-                    old_price = COALESCE(EXCLUDED.old_price, product_prices.old_price),
-                    discount = COALESCE(EXCLUDED.discount, product_prices.discount),
-                    rating = COALESCE(EXCLUDED.rating, product_prices.rating),
-                    reviews = COALESCE(EXCLUDED.reviews, product_prices.reviews),
-                    availability = EXCLUDED.availability,
-                    image_url = EXCLUDED.image_url, 
-                    scraped_at = CURRENT_TIMESTAMP;
-            """)
-
-            for product in products:
-                cur.execute(insert_query, (
-                    product["asin"], product["name"], 
-                    float(product["price"]) if product["price"] else None,
-                    float(product["old_price"]) if product["old_price"] else None,
-                    float(product["discount"]) if product["discount"] else None,
-                    product["description"], 
-                    float(product["rating"]) if product["rating"] else None,
-                    int(product["reviews"]) if product["reviews"] else None,
-                    product["availability"], 
-                    product["image_url"], 
-                    product["affiliate_link"]
-                ))
-        conn.commit()
-        logging.info("✅ Dati prodotti salvati nel database.")
-    except Exception as e:
-        logging.error(f"❌ Errore nel salvataggio dei dati: {e}")
-    finally:
-        conn.close()
-
-def get_all_products():
-    """📊 Recupera tutti i prodotti dal database."""
-    conn = connect_db()
-    if not conn:
-        return []
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM product_prices ORDER BY scraped_at DESC;")
-            products = cur.fetchall()
-        return products
-    except Exception as e:
-        logging.error(f"❌ Errore nel recupero dei prodotti: {e}")
-        return []
-    finally:
-        conn.close()
-
 def get_product_by_asin(asin):
-    """🔍 Recupera un prodotto specifico tramite ASIN."""
+    """🔍 Recupera un prodotto dal database dato il suo ASIN."""
     conn = connect_db()
     if not conn:
         return None
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM product_prices WHERE asin = %s;", (asin,))
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM product_prices WHERE asin = %s", (asin,))
             product = cur.fetchone()
-        return product
+            return product
     except Exception as e:
         logging.error(f"❌ Errore nel recupero del prodotto {asin}: {e}")
         return None
     finally:
         conn.close()
 
+def save_product_data(asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link):
+    """💾 Salva o aggiorna i dati di un prodotto nel database."""
+    conn = connect_db()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO product_prices (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, scraped_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (asin) DO UPDATE
+                SET price = EXCLUDED.price, old_price = product_prices.price, scraped_at = NOW();
+            """, (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link))
+        conn.commit()
+        logging.info(f"✅ Dati salvati per ASIN {asin}.")
+    except Exception as e:
+        logging.error(f"❌ Errore nel salvataggio dati di {asin}: {e}")
+    finally:
+        conn.close()
+
+def update_product_in_db(asin, new_data):
+    """🔄 Aggiorna i dati di un prodotto esistente nel database."""
+    conn = connect_db()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE product_prices
+                SET name = %s, price = %s, old_price = %s, discount = %s, 
+                    description = %s, rating = %s, reviews = %s, availability = %s, 
+                    image_url = %s, affiliate_link = %s, scraped_at = NOW()
+                WHERE asin = %s;
+            """, (
+                new_data["name"], new_data["price"], new_data["old_price"], new_data["discount"],
+                new_data["description"], new_data["rating"], new_data["reviews"], new_data["availability"],
+                new_data["image_url"], new_data["affiliate_link"], asin
+            ))
+        conn.commit()
+        logging.info(f"✅ Prodotto {asin} aggiornato con successo.")
+    except Exception as e:
+        logging.error(f"❌ Errore nell'aggiornamento del prodotto {asin}: {e}")
+    finally:
+        conn.close()
+
+# ✅ Test Database
 if __name__ == "__main__":
+    logger.info("🔍 Test connessione database e creazione tabelle...")
     create_tables()
+    logger.info("✅ Test completato!")

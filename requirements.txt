@@ -1,3 +1,4 @@
+# Librerie di base
 requests
 beautifulsoup4
 pandas
@@ -13,14 +14,28 @@ fake-useragent
 matplotlib
 joblib
 scikit-learn
+psutil
+
+
+# Database
 psycopg2
 sqlalchemy
+
+# Machine Learning
 XGBoost
 tensorflow
 optuna
+
+# API e Scraping
 ShopifyAPI
-requests
 selenium
+selenium-stealth
 webdriver-manager
 boto3
 python-amazon-paapi
+
+# Server per Render
+gunicorn
+
+
+python-telegram-bot
