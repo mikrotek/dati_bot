@@ -2,9 +2,10 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# ✅ Import dei moduli interni per rendere 'api' un vero pacchetto
+# ✅ Import dei moduli interni aggiornati
 from api.database import connect_db, create_tables
-from api.scraper import run_scraper
+from api.scraper_html_api import get_complete_product_data
+from api.scraper_api import get_affiliate_link  # AGGIUNTO
 from api.reports import generate_report
 from api.telegram_bot import start_telegram_bot
 from api.notifications import send_bulk_emails

@@ -15,6 +15,7 @@ matplotlib
 joblib
 scikit-learn
 psutil
+flask_cors
 
 
 # Database

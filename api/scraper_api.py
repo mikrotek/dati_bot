@@ -10,13 +10,13 @@ load_dotenv()
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_ASSOCIATE_TAG = os.getenv("AWS_ASSOCIATE_TAG")
-AWS_REGION = "IT"  # ✅ Amazon Italia (Corretto)
+AWS_REGION = "IT"  # ✅ Amazon Italia
 
 # ✅ Configurazione logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# ✅ Funzione per formattare i dati ricevuti
+# ✅ Funzione per formattare i dati ricevuti dall'API Amazon
 def format_data(item):
     try:
         return {
@@ -33,7 +33,7 @@ def format_data(item):
         logger.error(f"❌ Errore nel formattare i dati: {e}")
         return {}
 
-# ✅ Funzione per inviare richiesta API e ottenere dati
+# ✅ Funzione per ottenere dati e link affiliati da PA-API 5.0
 def get_product_data_from_api(asin_list):
     try:
         if not AWS_ACCESS_KEY or not AWS_SECRET_KEY or not AWS_ASSOCIATE_TAG:
@@ -50,7 +50,6 @@ def get_product_data_from_api(asin_list):
         if response:
             logger.info("✅ Risposta ricevuta con successo!")
             
-            # ✅ Converto la risposta in un formato serializzabile
             response_data = [item.to_dict() for item in response]
             logger.info(f"🔍 Risposta API: {json.dumps(response_data, indent=4, ensure_ascii=False)}")
 
@@ -72,6 +71,24 @@ def get_product_data_from_api(asin_list):
     except Exception as e:
         logger.error(f"❌ Errore critico: {e}")
         return None
+
+# ✅ Funzione per recuperare il link affiliato per un singolo ASIN
+def get_affiliate_link(asin):
+    try:
+        logger.info(f"🔗 Recupero link affiliato per ASIN: {asin}")
+        data = get_product_data_from_api([asin])
+
+        if data and len(data) > 0:
+            affiliate_link = data[0].get("URL", "N/A")
+            logger.info(f"✅ Link affiliato ottenuto: {affiliate_link}")
+            return affiliate_link
+        else:
+            logger.warning(f"⚠️ Nessun link affiliato trovato per ASIN {asin}")
+            return "N/A"
+
+    except Exception as e:
+        logger.error(f"❌ Errore nel recupero link affiliato: {e}")
+        return "N/A"
 
 # ✅ Avvio script
 if __name__ == "__main__":
