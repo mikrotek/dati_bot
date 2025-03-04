@@ -7,7 +7,7 @@ import joblib
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import xgboost as xgb
 
 # ✅ Carica variabili d'ambiente
@@ -25,7 +25,10 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 engine = create_engine(DATABASE_URL)
 
 # ✅ Selezione categoria
-category = input("🔍 Inserisci una categoria (Laptop, Smartphone, etc.): ").strip().lower()
+def get_category():
+    return input("🔍 Inserisci una categoria (Laptop, Smartphone, etc.): ").strip().lower()
+
+category = get_category()
 
 # ✅ Query per estrarre i dati dal database
 query = """
@@ -47,15 +50,15 @@ except Exception as e:
     exit()
 
 # ✅ Pulizia dati
-for col in ["old_price", "price_diff", "rating", "reviews", "rolling_avg_7", "rolling_avg_14", "rolling_avg_30"]:
-    df[col] = df[col].fillna(df[col].median())
+df.fillna(method='ffill', inplace=True)  # Riempimento forward dei dati mancanti
+df.fillna(0, inplace=True)  # Sostituzione eventuali NaN con 0
 
 # ✅ Conversione timestamp
 if "scraped_at" in df.columns:
     df["scraped_at"] = pd.to_datetime(df["scraped_at"])
     df["days_since"] = (df["scraped_at"].max() - df["scraped_at"]).dt.days
 
-# ✅ **Feature Engineering**
+# ✅ Feature Engineering
 df["rolling_avg_60"] = df["price"].rolling(window=60, min_periods=1).mean()
 df["rolling_avg_90"] = df["price"].rolling(window=90, min_periods=1).mean()
 
@@ -71,7 +74,7 @@ print(X.head())
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # ✅ Scalatura dei dati
-scaler = MinMaxScaler()
+scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
@@ -122,18 +125,3 @@ joblib.dump(best_model, model_filename)
 joblib.dump(scaler, scaler_filename)
 
 print(f"✅ Modello ottimizzato salvato in {model_filename}")
-
-# ✅ **Previsione per i prossimi 30 giorni**
-future_days = np.arange(1, 31).reshape(-1, 1)
-trend_factor = np.linspace(0.98, 1.02, num=30)  # Simulazione di variazione prezzo
-mean_values = np.tile(X.mean(numeric_only=True).values.reshape(1, -1), (30, 1))
-future_features = pd.DataFrame(np.hstack((future_days, mean_values[:, 1:])), columns=X.columns)
-future_scaled = scaler.transform(future_features)
-future_predictions = best_model.predict(future_scaled) * trend_factor
-
-# ✅ Salvataggio previsioni
-prediction_filename = f"data/ml/xgb_predictions_{category}.csv"
-prediction_df = pd.DataFrame({"days_since": future_days.flatten(), "predicted_price": future_predictions.flatten()})
-prediction_df.to_csv(prediction_filename, index=False)
-
-print(f"✅ Previsioni salvate in {prediction_filename}")

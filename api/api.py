@@ -51,9 +51,16 @@ def get_products(category=None):
 
 @app.route('/api/prodotti', methods=['GET'])
 def get_prodotti():
-    """📡 Restituisce tutti i prodotti o filtra per categoria"""
+    """📡 Restituisce tutti i prodotti o filtra per categoria e offerte"""
     category = request.args.get('category')
+    discount_filter = request.args.get('discount', type=int)
+
     prodotti = get_products(category)
+
+    # Se è richiesto un filtro sugli sconti
+    if discount_filter:
+        prodotti = [p for p in prodotti if p['discount'] and p['discount'] >= discount_filter]
+
     return jsonify(prodotti)
 
 @app.route('/api/categorie', methods=['GET'])

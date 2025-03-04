@@ -11,7 +11,7 @@ from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from scraper_api import get_affiliate_link
+from scraper_api import get_affiliate_link, get_special_offers  # ✅ Manteniamo entrambe le funzioni
 from database import check_product_exists, save_product_data
 
 # ✅ Configurazione logging
@@ -125,7 +125,6 @@ def get_product_data_from_html(query, search_type="asin"):
         try:
             asin = product.get("data-asin", query if search_type == "asin" else "N/A")
 
-            # ✅ Correggo il selettore del titolo
             title = safe_get_text(product.select_one("h2 a span"))
             if title == "N/A":
                 title = safe_get_text(product.select_one("span.a-size-medium.a-color-base"))
@@ -143,13 +142,14 @@ def get_product_data_from_html(query, search_type="asin"):
             image_url = product.select_one("img.s-image")["src"] if product.select_one("img.s-image") else "N/A"
             description = safe_get_text(product.select_one("div.a-row.a-size-small"))
 
-            # ✅ Recupera il link affiliato dall'API se l'ASIN esiste
+            # ✅ Recupero il link affiliato
             if check_product_exists(asin):
                 logger.info(f"🔄 Recupero link affiliato per ASIN {asin}...")
                 affiliate_link = get_affiliate_link(asin)
             else:
                 affiliate_link = f"https://www.amazon.it/dp/{asin}?tag={AWS_ASSOCIATE_TAG}" if asin != "N/A" else "N/A"
 
+            # ✅ Salvataggio nel database con offerte speciali
             product_data = {
                 "asin": asin,
                 "name": title,
@@ -162,12 +162,12 @@ def get_product_data_from_html(query, search_type="asin"):
                 "availability": None,
                 "image_url": image_url,
                 "affiliate_link": affiliate_link,
-                "category": query  # ✅ Assegniamo la categoria
+                "category": query,
+                "offer_text": None  # Questo sarà aggiornato con le offerte speciali
             }
 
             scraped_data.append(product_data)
 
-            # ✅ Salviamo nel database
             save_product_data(
                 asin=asin,
                 name=title,
@@ -180,7 +180,8 @@ def get_product_data_from_html(query, search_type="asin"):
                 availability=None,
                 image_url=image_url,
                 affiliate_link=affiliate_link,
-                category=query  # ✅ Passiamo la categoria
+                category=query,
+                offer_text=None
             )
             logger.info(f"✅ Prodotto salvato nel database: {title}")
 

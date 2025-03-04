@@ -3,8 +3,7 @@ import os
 import logging
 from psycopg2 import sql
 from dotenv import load_dotenv
-from scraper_api import get_affiliate_link
-
+from utils import get_affiliate_link
 
 # ✅ Carica variabili d'ambiente
 load_dotenv()
@@ -59,6 +58,7 @@ def create_tables():
                     image_url TEXT,
                     affiliate_link TEXT,
                     category TEXT NOT NULL,
+                    offer_text TEXT,  -- ✅ Aggiunto campo per offerte speciali
                     scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_product_prices_asin ON product_prices(asin);
@@ -86,23 +86,51 @@ def check_product_exists(asin):
     finally:
         conn.close()
 
-def get_product_by_asin(asin):
-    """🔍 Recupera un prodotto dal database dato il suo ASIN."""
+def get_products(category=None):
+    """📥 Estrae tutti i prodotti dal database, inclusi gli sconti e le offerte speciali."""
     conn = connect_db()
     if not conn:
-        return None
+        return []
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM product_prices WHERE asin = %s", (asin,))
-            product = cur.fetchone()
-            return product
+            query = """
+                SELECT asin, name, price, old_price, discount, description, rating, 
+                       reviews, availability, image_url, affiliate_link, category, offer_text
+                FROM product_prices
+            """
+            if category:
+                query += " WHERE category = %s;"
+                cur.execute(query, (category,))
+            else:
+                query += ";"
+                cur.execute(query)
+
+            prodotti = cur.fetchall()
+            return [
+                {
+                    "asin": row[0],
+                    "name": row[1],
+                    "price": row[2],
+                    "old_price": row[3],
+                    "discount": row[4],
+                    "description": row[5],
+                    "rating": row[6],
+                    "reviews": row[7],
+                    "availability": row[8],
+                    "image_url": row[9],
+                    "affiliate_link": row[10],
+                    "category": row[11],
+                    "offer_text": row[12]  # ✅ Aggiunto il testo dell'offerta
+                } for row in prodotti
+            ]
     except Exception as e:
-        logging.error(f"❌ Errore nel recupero del prodotto {asin}: {e}")
-        return None
+        print(f"❌ Errore nel recupero dei prodotti: {e}")
+        return []
     finally:
         conn.close()
 
-def save_product_data(asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category):
+def save_product_data(asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category, offer_text=None):
     """💾 Salva o aggiorna i dati di un prodotto nel database."""
     conn = connect_db()
     if not conn:
@@ -110,12 +138,15 @@ def save_product_data(asin, name, price, old_price, discount, description, ratin
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO product_prices (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category, scraped_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                INSERT INTO product_prices (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category, offer_text, scraped_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (asin) DO UPDATE
                 SET name = EXCLUDED.name, 
                     price = EXCLUDED.price, 
-                    old_price = product_prices.price, 
+                    old_price = CASE 
+                        WHEN product_prices.old_price IS NULL THEN product_prices.price 
+                        ELSE product_prices.old_price 
+                    END,
                     discount = EXCLUDED.discount, 
                     description = EXCLUDED.description, 
                     rating = EXCLUDED.rating, 
@@ -124,8 +155,9 @@ def save_product_data(asin, name, price, old_price, discount, description, ratin
                     image_url = EXCLUDED.image_url, 
                     affiliate_link = EXCLUDED.affiliate_link, 
                     category = EXCLUDED.category, 
+                    offer_text = EXCLUDED.offer_text,
                     scraped_at = NOW();
-            """, (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category))
+            """, (asin, name, price, old_price, discount, description, rating, reviews, availability, image_url, affiliate_link, category, offer_text))
         conn.commit()
         
         # ✅ Se il link affiliato è mancante, lo recuperiamo tramite API
@@ -135,31 +167,6 @@ def save_product_data(asin, name, price, old_price, discount, description, ratin
         logging.info(f"✅ Dati salvati per ASIN {asin} - Categoria: {category}")
     except Exception as e:
         logging.error(f"❌ Errore nel salvataggio dati di {asin}: {e}")
-    finally:
-        conn.close()
-
-def update_product_in_db(asin, new_data):
-    """🔄 Aggiorna i dati di un prodotto esistente nel database."""
-    conn = connect_db()
-    if not conn:
-        return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE product_prices
-                SET name = %s, price = %s, old_price = %s, discount = %s, 
-                    description = %s, rating = %s, reviews = %s, availability = %s, 
-                    image_url = %s, affiliate_link = %s, category = %s, scraped_at = NOW()
-                WHERE asin = %s;
-            """, (
-                new_data["name"], new_data["price"], new_data["old_price"], new_data["discount"],
-                new_data["description"], new_data["rating"], new_data["reviews"], new_data["availability"],
-                new_data["image_url"], new_data["affiliate_link"], new_data["category"], asin
-            ))
-        conn.commit()
-        logging.info(f"✅ Prodotto {asin} aggiornato con successo.")
-    except Exception as e:
-        logging.error(f"❌ Errore nell'aggiornamento del prodotto {asin}: {e}")
     finally:
         conn.close()
 

@@ -22,10 +22,13 @@ DB_PORT = os.getenv("DB_PORT")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(DATABASE_URL)
 
-# ✅ Input categoria
-category = input("🔍 Inserisci una categoria (Laptop, Smartphone, etc.): ").strip().lower()
+# ✅ Selezione categoria
+def get_category():
+    return input("🔍 Inserisci una categoria (Laptop, Smartphone, etc.): ").strip().lower()
 
-# ✅ Caricamento dati storici con forward fill per i NULL
+category = get_category()
+
+# ✅ Caricamento dati storici
 query = """
     SELECT price_history.asin, price_history.scraped_at, price_history.old_price, price_history.price_diff, 
            price_history.rolling_avg_7, price_history.rolling_avg_14, price_history.rolling_avg_30, 
@@ -35,79 +38,59 @@ query = """
     WHERE LOWER(product_prices.name) LIKE %s
     ORDER BY price_history.scraped_at
 """
+
 df = pd.read_sql(query, engine, params=(f"%{category}%",))
 
-# ✅ Gestione valori NULL
 if df.empty:
     raise ValueError("❌ Errore: Nessun dato disponibile per questa categoria!")
-df.fillna(method='ffill', inplace=True)  # Riempie i NULL con i valori precedenti
-df.fillna(0, inplace=True)  # Eventuali NULL rimanenti vengono impostati a 0
+
+df.fillna(method='ffill', inplace=True)
+df.fillna(0, inplace=True)
 
 df["scraped_at"] = pd.to_datetime(df["scraped_at"])
 df.sort_values("scraped_at", inplace=True)
 df["days_since"] = (df["scraped_at"] - df["scraped_at"].min()).dt.days
 
-# ✅ Debug: Stampa le prime righe dei dati
-print("\n📊 **Dati dal Database (Prime 5 righe)**:")
-print(df.head())
-
-# ✅ Caricamento modelli e scaler
+# ✅ Caricamento modelli aggiornati
 xgb_model = joblib.load(f"models/xgb_model_{category}.pkl")
 xgb_scaler = joblib.load(f"models/scaler_{category}.pkl")
 lstm_model = tf.keras.models.load_model(f"models/lstm_model_{category}.keras")
 lstm_scaler_X = joblib.load(f"models/scaler_X_{category}.pkl")
 lstm_scaler_y = joblib.load(f"models/scaler_y_{category}.pkl")
 
-# ✅ Recupero ordine delle feature dal modello XGBoost
+# ✅ Assicurarsi che le feature siano nell'ordine corretto
 expected_columns = xgb_model.get_booster().feature_names
 if expected_columns is None:
     raise ValueError("❌ Errore: Il modello XGBoost non ha feature names. Probabile errore nel training.")
 
-# ✅ Assicuriamoci che X_train abbia le feature nell'ordine corretto
 X_train = df[expected_columns]
 
-# ✅ Generazione dati futuri (Ora esteso a 60 giorni)
+# ✅ Generazione dati futuri
 num_days = 60
-mean_values = X_train.mean().values.reshape(1, -1)
-mean_values = np.tile(mean_values, (num_days, 1))
 future_days = np.arange(1, num_days + 1).reshape(-1, 1)
-future_features_df = pd.DataFrame(mean_values, columns=expected_columns)
+mean_values = X_train.mean().values.reshape(1, -1)
+future_features_df = pd.DataFrame(np.tile(mean_values, (num_days, 1)), columns=expected_columns)
 future_features_df["days_since"] = future_days.flatten()
 
-# ✅ Debug: Stampa le prime righe delle feature future
-print("\n📊 **Feature Future (Prime 5 righe)**:")
-print(future_features_df.head())
-
-# ✅ Trasformazione dati per XGBoost
+# ✅ Previsioni XGBoost
 future_scaled_xgb = xgb_scaler.transform(future_features_df)
 xgb_predictions = xgb_model.predict(future_scaled_xgb)
 
-# ✅ Trasformazione dati per LSTM
+# ✅ Previsioni LSTM
 future_scaled_lstm = lstm_scaler_X.transform(future_features_df).reshape(num_days, 1, len(expected_columns))
 lstm_predictions = lstm_model.predict(future_scaled_lstm)
 lstm_predictions = lstm_scaler_y.inverse_transform(lstm_predictions).flatten()
 
-# ✅ Debug: Mostra un'anteprima delle previsioni
-print("\n📈 **Anteprima Previsioni XGBoost e LSTM**:")
-print(pd.DataFrame({"XGBoost": xgb_predictions[:5], "LSTM": lstm_predictions[:5]}))
-
-# ✅ Calcolo pesatura dinamica
+# ✅ Bilanciamento pesi tra XGBoost e LSTM
 r2_xgb = r2_score(df["old_price"], xgb_model.predict(xgb_scaler.transform(X_train)))
 r2_lstm = r2_score(df["old_price"].iloc[-num_days:], lstm_predictions[:num_days]) if len(df) >= num_days else 0
 
-print(f"📊 R² XGBoost: {r2_xgb:.4f}, R² LSTM: {r2_lstm:.4f}")
-
-# ✅ Se R² è negativo, bilanciamo su XGBoost
 if r2_lstm < 0:
-    print("⚠️ Attenzione: R² LSTM negativo, usiamo 90% XGBoost e 10% LSTM!")
     weight_xgb, weight_lstm = 0.9, 0.1
 else:
     weight_xgb = max(0, min(1, r2_xgb / (r2_xgb + r2_lstm)))
     weight_lstm = 1 - weight_xgb
 
-print(f"📊 Pesatura corretta -> XGBoost: {weight_xgb:.2f}, LSTM: {weight_lstm:.2f}")
-
-# ✅ Calcolo media tra i modelli (Hybrid Model)
 hybrid_predictions = (weight_xgb * xgb_predictions) + (weight_lstm * lstm_predictions)
 
 # ✅ Creazione grafico
